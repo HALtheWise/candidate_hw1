@@ -33,7 +33,7 @@ This assumes that your FDM machine cannot perform bridging operations.
 
 In addition to the cases above, a vertex needs support if none of its neighboring vertices are sufficiently below it. (i.e. tip of a [stalagtite](http://media.gettyimages.com/photos/stalactites-and-stalagmites-in-jenolan-caves-picture-id595906719?s=612x612) )
 
-
+    
 ![](problem-1/part.gif)
 
 # --Original assignment below--
