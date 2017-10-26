@@ -1,13 +1,11 @@
 # coding: utf-8
 
-from matplotlib.patches import Circle
-
 import numpy as np
-import matplotlib.pyplot as plt
 from collections import defaultdict
 
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
 from mpl_toolkits import mplot3d
-
 # Using library numpy-stl to handle STL files (https://pypi.python.org/pypi/numpy-stl)
 from stl.mesh import Mesh
 
@@ -18,31 +16,38 @@ from stl.mesh import Mesh
 # 1. The "house" shape, which should need no support at all because the sloped roof holds up the top edge.
 # 2. Anything touching the build plate, which doesn't need support.
 # 3. A Cube, where the top edges don't need support, but the top face does.
-# 4. A stalagtite, where the tip vertex needs support, but none of the edges or faces do.
+# 4. A stalactite, where the tip vertex needs support, but none of the edges or faces do.
 
 # # Plan
 
-# The basic approach I want to take is to determine whether a face/edge/vertex needs support purely by looking at the local properties of that feature and the things around it. We'll see if that works.
+# The basic approach I want to take is to determine whether a face/edge/vertex needs support purely by
+# looking at the local properties of that feature and the things around it. We'll see if that works.
 # 
-# An alternative approach would be to build a directed graph indicating what things hold each other up, and reason about which edges need to be added to make it have a root.
+# An alternative approach would be to build a directed graph indicating what things hold each other up, and
+# reason about which edges need to be added to make it have a root.
 
 # An STL file contains information about faces, edges, and vertices.
 # ## Faces
-# A face needs support when its is "flat" i.e. its normal vectors is close to the gravity vector. A cross product to get the normal vector, followed by a dot product with the gravity vector, makes computing that really easy.
+# A face needs support when its is "flat" i.e. its normal vectors is close to the gravity vector. A cross product
+# to get the normal vector, followed by a dot product with the gravity vector, makes computing that really easy.
 # 
 # Precomputation of $cos(\theta)$ should make the whole computation quite cheap.
 # 
 # ## Edges
-# In addition to edges surrounding faces needing support, some edges themselves need to be supported, even if both of their neighboring faces are fine. An example is a horizontal edge connecting two faces in a "V" configuration. Notice that this edge requires support, while the inverse case (a peak) doesn't.
+# In addition to edges surrounding faces needing support, some edges themselves need to be supported, even if both
+# of their neighboring faces are fine. An example is a horizontal edge connecting two faces in a "V" configuration.
+# Notice that this edge requires support, while the inverse case (a peak) doesn't.
 # 
-# In this case, we are looking for an edge that is mostly horizontal (dot product again), and where neither (none) of its neighboring faces is sufficiently below it to support it (using their normals). Depending on what's next in the pipeline, it may or may not matter whether an edge adjacent to a supported face is supported or not.
+# In this case, we are looking for an edge that is mostly horizontal (dot product again), and where neither (none)
+# of its neighboring faces is sufficiently below it to support it (using their normals). Depending on what's next
+# in the pipeline, it may or may not matter whether an edge adjacent to a supported face is supported or not.
 # 
 # This assumes that your FDM machine cannot perform bridging operations.
 # 
 # ## Vertices
 # 
-# In addition to the cases above, a vertex needs support if none of its neighboring vertices are sufficiently below it. (i.e. tip of a [stalagtite](http://media.gettyimages.com/photos/stalactites-and-stalagmites-in-jenolan-caves-picture-id595906719?s=612x612) )
-# # Implementation
+# In addition to the cases above, a vertex needs support if none of its neighboring vertices are sufficiently below it.
+# (i.e. tip of a stalactite)
 
 class OverhangDetector(object):
     epsilon = 0.000001  # A very small number, to deal with floating point rounding.
@@ -207,8 +212,8 @@ class OverhangDetector(object):
             add_edge((p2, p3), face)
             add_edge((p1, p3), face)
 
-        for face in faces:
-            add_face(map(tuple, face))
+        for f in faces:
+            add_face(map(tuple, f))
 
         return faces, edges, vertices
 
