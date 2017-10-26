@@ -1,10 +1,6 @@
-
 # coding: utf-8
 
-# In[1]:
-
-
-get_ipython().run_line_magic('matplotlib', 'notebook')
+from matplotlib.patches import Circle
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -48,338 +44,224 @@ from stl.mesh import Mesh
 # In addition to the cases above, a vertex needs support if none of its neighboring vertices are sufficiently below it. (i.e. tip of a [stalagtite](http://media.gettyimages.com/photos/stalactites-and-stalagmites-in-jenolan-caves-picture-id595906719?s=612x612) )
 # # Implementation
 
+class OverhangDetector(object):
+    epsilon = 0.000001  # A very small number, to deal with floating point rounding.
 
+    def __init__(self, overhang=np.deg2rad(45), down=(0, 0, -1)):
+        self.overhang = overhang
+        self.down = np.array(down)
 
-down = np.array([0, 0, -1])
-theta = np.deg2rad(45)
+        self.costheta = np.cos(self.overhang)
 
-epsilon = 0.000001 # A very small number, to deal with floating point rounding.
+    def isMostlyUp(self, vec):
+        """
+        Returns true if the provided 3-vector is pointning within theta of up
+        """
+        up = -self.down
+        cosangle = np.dot(vec, up) / (np.linalg.norm(up) * np.linalg.norm(vec))
 
-def isMostlyUp(vec):
-    """
-    Returns true if the provided 3-vector is pointning within theta of up
-    """
-    up = -down
-    cosangle = np.dot(vec, up) / (np.linalg.norm(up) * np.linalg.norm(vec))
-    costheta = np.cos(theta)
-    
-    return cosangle >= costheta
+        return cosangle >= self.costheta
 
-def isMostlyVertical(vec):
-    """
-    Returns true if the provided 3-vector is pointning within theta of up or down
-    """
-    cosangle = np.dot(vec, down) / (np.linalg.norm(down) * np.linalg.norm(vec))
-    costheta = np.cos(theta)
-    
-    return cosangle >= costheta or cosangle <= -costheta
+    def isMostlyVertical(self, vec):
+        """
+        Returns true if the provided 3-vector is pointning within theta of up or down
+        """
+        cosangle = np.dot(vec, self.down) / (np.linalg.norm(self.down) * np.linalg.norm(vec))
 
-tests = [[0,0,1],
-        [0,1,2],
-        [0,2,1],
-        [0,-1,-3],
-        [0,4,0],
-        ]
+        return cosangle >= self.costheta or cosangle <= -self.costheta
 
-for t in tests:
-    print t, isMostlyVertical(t)
+    def almostEqual(self, v1, v2):
+        """
+        Checks whether two values (numbers, vectors, or arrays) are equal within epsilon.
+        """
+        return np.max(np.abs(v2 - v1)) <= self.epsilon
 
+    def isOnBuildPlate(self, point):
+        # The build plate is assumed to be a infinite plane perpendicular
+        # to gravity, passing through the point (0, 0, 0)
+        return self.almostEqual(np.dot(point, self.down), 0)
 
-# In[3]:
+    def faceNeedsSupport(self, face):
+        """
+        face is a list of three vertices
+        """
+        p1, p2, p3 = np.array(face)
+        normal = np.cross(p2 - p1, p3 - p1)
 
-
-def almostEqual(v1, v2):
-    """
-    Checks whether two values (numbers, vectors, or arrays) are equal within epsilon.
-    """
-    return np.max(np.abs(v2 - v1)) <= epsilon
-
-
-# In[4]:
-
-
-def isOnBuildPlate(point):
-    # The build plate is assumed to be a infinite plane perpendicular 
-    # to gravity, passing through the point (0, 0, 0)
-    return almostEqual(np.dot(point, down), 0)
-
-
-# In[5]:
-
-
-def faceNeedsSupport(face):
-    """
-    face is a list of three vertices
-    """
-    p1, p2, p3 = np.array(face)
-    normal = np.cross(p2-p1, p3-p1)
-    
-    if not isMostlyVertical(normal):
-        # The face itself is vertical
-        return False
-    else:
-        # The face is horizontal
-        for p in face:
-            if not isOnBuildPlate(p):
-                # At least one vertex is not on the build plate
-                return True
-        # All vertices on build plate
-        return False
-
-
-# In[6]:
-
-
-def edgeNeedsSupport(endpoints, faces):
-    """endpoints is list of two points, 
-    faces is a list of arbitrarily many neighboring faces, given as triples of points"""
-    
-    p1, p2 = np.array(endpoints)
-    
-    if isMostlyVertical(p2-p1):
-        # Vertical edges are supported by their endpoint
-        return False
-    
-    if isOnBuildPlate(p1) and isOnBuildPlate(p2):
-        # This edge is supported by the build plate
-        return False        
-    
-    # Check for a face that supports this edge
-    for face in faces:
-        # We need to check whether the face is "below" the edge.
-        # Note that this can happen even if the third point on the edge is above 
-        # both of the points on the edge.
-        
-        otherPoints = [p for p in face if (not almostEqual(p, p1) and not almostEqual(p, p2))]
-        if len(otherPoints) != 1:
-            raise Exception('Face provided not containing given edge')
-            
-        p3 = np.array(otherPoints[0])
-        
-        # The easiest way to check this is to which side of this edge the face is on
-        # is to compute the cross product of this edge's vector with the vector to the third point,
-        # as well as the cross product of this edge's vector and gravity. If those vectors are within 
-        # +-90 degrees of each other, the face is below the edge.
-        
-        faceNormal = np.cross((p2-p1), (p3-p1))
-        gravityNormal = np.cross((p2-p1), down)
-        
-#         faceNormal /= np.linalg.norm(faceNormal)
-#         gravityNormal /= np.linalg.norm(gravityNormal)
-        
-        if np.dot(faceNormal, gravityNormal) > 0:
-            # The face is "below" this edge
-            if not faceNeedsSupport(face):
-                # The face can support this edge
-                return False
-            
-            
-    return True
-    
-
-
-# In[7]:
-
-
-def vertexNeedsSupport(point, edges):
-    """
-    Takes as input:
-        - A point Vector3
-        - A list of edges connected to this point, given as pairs of points
-    """
-    point = np.array(point)
-    edges = np.array(edges)
-    
-    if isOnBuildPlate(point):
-        return False
-    
-    for edge in edges:
-        otherPoints = [p for p in edge if not almostEqual(p, point)]
-        if len(otherPoints) != 1:
-            raise Exception('Edge provided not containing given vertex')
-        other = otherPoints[0]
-        
-        # Check whether this point is mostly above the current edge
-        if isMostlyUp(point - other):
-            # This vertex is at the top of the provided edge, and so supported.
+        if not self.isMostlyVertical(normal):
+            # The face itself is vertical
             return False
-        
-    return True
+        else:
+            # The face is horizontal
+            for p in face:
+                if not self.isOnBuildPlate(p):
+                    # At least one vertex is not on the build plate
+                    return True
+            # All vertices on build plate
+            return False
+
+    def edgeNeedsSupport(self, endpoints, faces):
+        """endpoints is list of two points,
+        faces is a list of arbitrarily many neighboring faces, given as triples of points"""
+
+        p1, p2 = np.array(endpoints)
+
+        if self.isMostlyVertical(p2 - p1):
+            # Vertical edges are supported by their endpoint
+            return False
+
+        if self.isOnBuildPlate(p1) and self.isOnBuildPlate(p2):
+            # This edge is supported by the build plate
+            return False
+
+        # Check for a face that supports this edge
+        for face in faces:
+            # We need to check whether the face is "below" the edge.
+            # Note that this can happen even if the third point on the edge is above
+            # both of the points on the edge.
+
+            otherPoints = [p for p in face if (not self.almostEqual(p, p1) and not self.almostEqual(p, p2))]
+            if len(otherPoints) != 1:
+                raise Exception('Face provided not containing given edge')
+
+            p3 = np.array(otherPoints[0])
+
+            # The easiest way to check this is to which side of this edge the face is on
+            # is to compute the cross product of this edge's vector with the vector to the third point,
+            # as well as the cross product of this edge's vector and gravity. If those vectors are within
+            # +-90 degrees of each other, the face is below the edge.
+
+            faceNormal = np.cross((p2 - p1), (p3 - p1))
+            gravityNormal = np.cross((p2 - p1), self.down)
+
+            #         faceNormal /= np.linalg.norm(faceNormal)
+            #         gravityNormal /= np.linalg.norm(gravityNormal)
+
+            if np.dot(faceNormal, gravityNormal) > 0:
+                # The face is "below" this edge
+                if not self.faceNeedsSupport(face):
+                    # The face can support this edge
+                    return False
+
+        return True
+
+    def vertexNeedsSupport(self, point, edges):
+        """
+        Takes as input:
+            - A point Vector3
+            - A list of edges connected to this point, given as pairs of points
+        """
+        point = np.array(point)
+        edges = np.array(edges)
+
+        if self.isOnBuildPlate(point):
+            return False
+
+        for edge in edges:
+            otherPoints = [p for p in edge if not self.almostEqual(p, point)]
+            if len(otherPoints) != 1:
+                raise Exception('Edge provided not containing given vertex')
+            other = otherPoints[0]
+
+            # Check whether this point is mostly above the current edge
+            if self.isMostlyUp(point - other):
+                # This vertex is at the top of the provided edge, and so supported.
+                return False
+
+        return True
+
+    def splitFaces(self, faces):
+        """
+
+        :return: tuple of (faces, edges, vertices)
+        """
+        vertices = defaultdict(
+            set)  # Map of vertex (tuple) to set of neighboring edges, each represented as a sorted tuple
+        edges = defaultdict(
+            set)  # Map of edge (sorted tuple) to set of neighboring faces, each represented as a sorted tuple
+
+        # faces = set() # set of faces (sorted tuples)
+
+        # TODO: Refactor to not use nested functions
+        def add_vertex(vertex, edge):
+            edge = tuple(sorted(edge))
+            if vertex not in edge:
+                raise Exception('Vertex must be in edge')
+            vertices[vertex].add(edge)
+
+        def add_edge(edge, face):
+            edge = tuple(sorted(edge))
+            face = tuple(sorted(face))
+
+            p1, p2 = edge
+            add_vertex(p1, edge)
+            add_vertex(p2, edge)
+
+            edges[edge].add(face)
+
+        def add_face(face):
+            face = tuple(sorted(face))
+
+            p1, p2, p3 = face
+            add_edge((p1, p2), face)
+            add_edge((p2, p3), face)
+            add_edge((p1, p3), face)
+
+        for face in faces:
+            add_face(map(tuple, face))
+
+        return faces, edges, vertices
+
+    # Create a new plot
+    def solveAndDisp(self, faces, showFaces=True, showEdges=True, showVertices=True):
+        faces, edges, vertices = self.splitFaces(faces)
+
+        fig = plt.figure()
+        axes = mplot3d.Axes3D(fig)
+
+        axes.set_xlabel('x')
+        axes.set_ylabel('y')
+        axes.set_zlabel('z')
+
+        # TODO: Automatically determine appropriate bounds based on model data
+        axes.set_xlim(-20, 20)
+        axes.set_ylim(-20, 20)
+        axes.set_zlim(0, 40)
+
+        red = (1, 0, 0)
+        blue = (0, 0, 1)
+
+        if showEdges:
+            edgeskeys = edges.keys()
+
+            linecollection = mplot3d.art3d.Line3DCollection(edgeskeys, alpha=1)
+            linecollection.set_color([red if self.edgeNeedsSupport(e, edges[e]) else blue for e in edgeskeys])
+
+            axes.add_collection3d(linecollection)
+
+        if showFaces:
+            facecollection = mplot3d.art3d.Poly3DCollection(faces, alpha=0.1)
+            facecollection.set_color([red if self.faceNeedsSupport(f) else blue for f in faces])
+
+            axes.add_collection3d(facecollection)
+
+        if showVertices:
+            for p, es in vertices.iteritems():
+                circle = Circle(p[0:2], 1)
+                circle.set_color(red if self.vertexNeedsSupport(p, list(es)) else blue)
+                axes.add_patch(circle)
+                mplot3d.art3d.pathpatch_2d_to_3d(circle, z=p[2])
+
+        return fig
 
 
-# In[8]:
+if __name__ == '__main__':
+    detector = OverhangDetector()
 
+    detector.solveAndDisp(Mesh.from_file('tests/octahedron.stl').vectors).show()
+    detector.solveAndDisp(Mesh.from_file('tests/cube.stl').vectors).show()
 
-np.sort(np.array([[1,2,3],[1,4,2]]),axis=0)
+    detector.solveAndDisp(Mesh.from_file('part.stl').vectors, showVertices=False).show()
 
-
-# # Using it
-
-# In[9]:
-
-
-def splitFaces(faces):
-    vertices = defaultdict(set) # Map of vertex (tuple) to set of neighboring edges, each represented as a sorted tuple
-    edges = defaultdict(set) # Map of edge (sorted tuple) to set of neighboring faces, each represented as a sorted tuple
-    # faces = set() # set of faces (sorted tuples)
-
-    def add_vertex(vertex, edge):
-        edge = tuple(sorted(edge))
-        if vertex not in edge:
-            raise Exception('Vertex must be in edge')
-        vertices[vertex].add(edge)
-
-    def add_edge(edge, face):
-        edge = tuple(sorted(edge))
-        face = tuple(sorted(face))
-
-        p1, p2 = edge
-        add_vertex(p1, edge)
-        add_vertex(p2, edge)
-
-        edges[edge].add(face)
-
-    def add_face(face):
-        face = tuple(sorted(face))
-
-        p1, p2, p3 = face
-        add_edge((p1, p2), face)
-        add_edge((p2, p3), face)
-        add_edge((p1, p3), face)
-
-
-    for face in faces:
-        add_face(map(tuple, face))
-        
-    return faces, edges, vertices
-
-
-# In[10]:
-
-
-model = Mesh.from_file('tests/cube.stl')
-faces = model.vectors
-
-vertices = defaultdict(set) # Map of vertex (tuple) to set of neighboring edges, each represented as a sorted tuple
-edges = defaultdict(set) # Map of edge (sorted tuple) to set of neighboring faces, each represented as a sorted tuple
-# faces = set() # set of faces (sorted tuples)
-
-def add_vertex(vertex, edge):
-    edge = tuple(sorted(edge))
-    if vertex not in edge:
-        raise Exception('Vertex must be in edge')
-    vertices[vertex].add(edge)
-    
-def add_edge(edge, face):
-    edge = tuple(sorted(edge))
-    face = tuple(sorted(face))
-    
-    p1, p2 = edge
-    add_vertex(p1, edge)
-    add_vertex(p2, edge)
-    
-    edges[edge].add(face)
-    
-def add_face(face):
-    face = tuple(sorted(face))
-    
-    p1, p2, p3 = face
-    add_edge((p1, p2), face)
-    add_edge((p2, p3), face)
-    add_edge((p1, p3), face)
-    
-
-faces[:2]
-
-for face in faces:
-    add_face(map(tuple, face))
-
-
-# In[11]:
-
-
-for face in faces:
-    print faceNeedsSupport(face)
-    
-# There should be 2, the top ones
-
-
-# In[12]:
-
-
-for edge, fs in edges.iteritems():
-    print edgeNeedsSupport(edge, fs)
-    
-# There should just be one (the top crease)
-
-
-# In[13]:
-
-
-for vertex, es in vertices.iteritems():
-    print vertexNeedsSupport(vertex, list(es))
-# Should be none
-
-
-# In[14]:
-
-
-print len(faces) # Should be 6: 2 per face of the cube
-print len(edges) # Should be 18: 12 + 6 extra
-print len(vertices) # Should be 8: the corners
-
-
-# ## Rendering
-
-# In[25]:
-
-
-from matplotlib.patches import Circle
-
-# Create a new plot
-def solveAndDisp(faces):
-    faces, edges, vertices = splitFaces(faces)
-    
-    fig = plt.figure()
-    axes = mplot3d.Axes3D(fig)
-    
-    axes.set_xlabel('x')
-    axes.set_ylabel('y')
-    axes.set_zlabel('z')
-
-    # TODO: Automatically determine appropriate bounds based on model data
-    axes.set_xlim(-20,20)
-    axes.set_ylim(-20,20)
-    axes.set_zlim(0,40)
-
-    red = (1,0,0)
-    blue = (0,0,1)
-
-    theseedges = edges.keys()
-
-    linecollection = mplot3d.art3d.Line3DCollection(theseedges, alpha=1)
-    linecollection.set_color([red if edgeNeedsSupport(e, edges[e]) else blue for e in theseedges])
-
-    facecollection = mplot3d.art3d.Poly3DCollection(faces, alpha=0.1)
-    facecollection.set_color([red if faceNeedsSupport(f) else blue for f in faces])
-
-    for p, es in vertices.iteritems():
-        circle = Circle(p[0:2], 1)
-        circle.set_color(red if vertexNeedsSupport(p, list(es)) else blue)
-        axes.add_patch(circle)
-        mplot3d.art3d.pathpatch_2d_to_3d(circle, z=p[2])
-
-    axes.add_collection3d(linecollection)
-    axes.add_collection3d(facecollection)
-
-    return fig
-
-solveAndDisp(Mesh.from_file('tests/octahedron.stl').vectors);
-solveAndDisp(Mesh.from_file('tests/cube.stl').vectors);
-
-
-# In[24]:
-
-
-solveAndDisp(Mesh.from_file('part.stl').vectors);
-
+    while True:
+        pass
